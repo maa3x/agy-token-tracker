@@ -17,7 +17,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 plugin_root = os.path.dirname(os.path.dirname(script_dir))
 sys.path.insert(0, os.path.join(plugin_root, "scripts"))
 
-from get_tokens import get_all_conversations, get_conversation
+from get_tokens import get_all_conversations, get_conversation, get_conversation_details
 
 # Cache for /api/stats
 _STATS_CACHE = {"timestamp": 0, "data": None}
@@ -47,6 +47,28 @@ class TokenTrackerHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
+
+        if path == "/api/details":
+            cid = query.get("cid", [None])[0]
+            if not cid:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Missing cid parameter"}).encode())
+                return
+            data = get_conversation_details(cid)
+            if not data:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Conversation not found"}).encode())
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
+            return
 
         if path == "/api/stats":
             cid = query.get("cid", [None])[0]

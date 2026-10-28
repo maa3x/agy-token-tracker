@@ -87,6 +87,75 @@ def parse_transcript(file_path):
     except Exception:
         return None
 
+def get_conversation_details(cid):
+    file_path = os.path.expanduser(f"~/.gemini/antigravity/brain/{cid}/.system_generated/logs/transcript.jsonl")
+    if not os.path.exists(file_path):
+        return None
+
+    input_tokens = 0
+    output_tokens = 0
+    cache_read_tokens = 0
+    raw_prompt = ""
+    start_time = None
+    end_time = None
+    turns = []
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                except Exception:
+                    continue
+
+                ts = data.get("created_at")
+                if ts:
+                    if not start_time:
+                        start_time = ts
+                    end_time = ts
+
+                if data.get("type") == "USER_INPUT" and not raw_prompt:
+                    content = data.get("content", "")
+                    if content and len(content.strip()) > 0:
+                        raw_prompt = content.strip()
+
+                if data.get("type") == "PLANNER_RESPONSE":
+                    inp = data.get("input_tokens", 0)
+                    out = data.get("output_tokens", 0)
+                    cache = data.get("cache_read_tokens", 0)
+                    input_tokens += inp
+                    output_tokens += out
+                    cache_read_tokens += cache
+
+                    tools = [t.get("name") for t in data.get("tool_calls", []) if t.get("name")]
+                    turns.append({
+                        "step": data.get("step_index", len(turns) + 1),
+                        "time": ts,
+                        "input": inp,
+                        "output": out,
+                        "cache": cache,
+                        "total": inp + out,
+                        "tools": tools
+                    })
+
+        return {
+            "conversation_id": cid,
+            "title": clean_title(raw_prompt),
+            "full_prompt": raw_prompt[:500] if raw_prompt else "",
+            "start_time": start_time,
+            "end_time": end_time,
+            "turn_count": len(turns),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "turns": turns
+        }
+    except Exception:
+        return None
+
 def get_all_conversations():
     brain_dir = os.path.expanduser("~/.gemini/antigravity/brain")
     pattern = os.path.join(brain_dir, "*", ".system_generated", "logs", "transcript.jsonl")
@@ -121,11 +190,15 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Extract token usage from Antigravity conversations")
     parser.add_argument("--conversation", "-c", help="Conversation ID")
+    parser.add_argument("--details", "-d", action="store_true", help="Include turn-by-turn details")
     parser.add_argument("--json", "-j", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
 
     if args.conversation:
-        data = get_conversation(args.conversation)
+        if args.details:
+            data = get_conversation_details(args.conversation)
+        else:
+            data = get_conversation(args.conversation)
         if not data:
             print(json.dumps({"error": f"Conversation {args.conversation} not found"}))
             sys.exit(1)
