@@ -6,25 +6,33 @@ import glob
 import re
 from datetime import datetime
 
+# In-memory cache for parsed files: path -> (mtime, size, stats)
+_FILE_CACHE = {}
+
 def clean_title(raw_text):
     if not raw_text:
         return "Untitled Conversation"
-    # Remove USER_REQUEST tags
     if "<USER_REQUEST>" in raw_text:
         raw_text = raw_text.split("<USER_REQUEST>")[1].split("</USER_REQUEST>")[0]
     
-    # Clean whitespace and newlines
     text = " ".join(raw_text.strip().split())
-    
-    # Remove leading file mentions @[...]
     text = re.sub(r"^@\[.*?\]\s*", "", text)
-    
-    # Clean extra quotes or slash commands
     if len(text) > 80:
         text = text[:80] + "..."
     return text if text else "Untitled Conversation"
 
 def parse_transcript(file_path):
+    try:
+        stat = os.stat(file_path)
+        mtime, size = stat.st_mtime, stat.st_size
+    except OSError:
+        return None
+
+    if file_path in _FILE_CACHE:
+        cached_mtime, cached_size, cached_data = _FILE_CACHE[file_path]
+        if cached_mtime == mtime and cached_size == size:
+            return cached_data.copy()
+
     input_tokens = 0
     output_tokens = 0
     cache_read_tokens = 0
@@ -63,7 +71,7 @@ def parse_transcript(file_path):
         total_tokens = input_tokens + output_tokens
         title = clean_title(raw_prompt)
         
-        return {
+        result = {
             "turn_count": turn_count,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -74,7 +82,9 @@ def parse_transcript(file_path):
             "start_time": start_time,
             "end_time": end_time
         }
-    except Exception as e:
+        _FILE_CACHE[file_path] = (mtime, size, result)
+        return result.copy()
+    except Exception:
         return None
 
 def get_all_conversations():
